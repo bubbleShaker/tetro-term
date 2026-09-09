@@ -1,0 +1,62 @@
+name: Deploy to GitHub Pages
+
+# main への push で自動的に再デプロイする。
+# スマートフォンからの動作確認はこの経路に頼っているため（PLAN.md 参照）、
+# ビルドは軽く保つこと。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 進行中のデプロイは打ち切らない。打ち切ると「push すれば必ず反映される」という
+# スマホ確認の前提が崩れ、連続 push で古い版が残りうる。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # 権限はジョブ単位で最小限に。ビルドはリポジトリを読むだけでよい。
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # go.mod に書かれたバージョンを使う。wasm_exec.js は
+          # このバージョンの GOROOT からコピーされるので、両者は必ず一致する。
+          go-version-file: go.mod
+
+      # 現時点のコードは js/wasm 専用のビルドタグが付いており、ホストの
+      # linux/amd64 では対象パッケージが 0 個になって go vet / go test が
+      # 終了コード 1 を返す。検査対象を js/wasm に切り替えて実際に検査する。
+      # コアを追加する M1 で `go test ./...` をここに足す。
+      - name: 静的検査 (js/wasm)
+        run: GOOS=js GOARCH=wasm go vet ./...
+
+      - name: ブラウザ版をビルド
+        run: ./scripts/build-wasm.sh
+
+      - uses: actions/configure-pages@v5
+        with:
+          # リポジトリ設定で Pages が未有効でも、ワークフロー側から有効化する
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <!-- user-scalable=no: 落ち物パズルの操作中に二本指ズームが暴発するのを防ぐ -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
+    />
+    <title>tetro-term</title>
+    <meta
+      name="description"
+      content="ターミナルで動く落ち物パズル。Go で書かれた同じコアが CLI とブラウザの両方で動く。"
+    />
+    <link rel="stylesheet" href="./vendor/xterm.css" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0e14;
+        --fg: #c8d0e0;
+        --dim: #5c6773;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        padding: max(0.75rem, env(safe-area-inset-top)) 0.75rem
+          max(0.75rem, env(safe-area-inset-bottom));
+        overflow: hidden;
+      }
+
+      #terminal {
+        width: min(100%, 68ch);
+        flex: 1 1 auto;
+        min-height: 0;
+        /* 端末らしい枠。ゲーム画面が主役なので装飾は最小限に留める */
+        border: 1px solid #1c2230;
+        border-radius: 6px;
+        padding: 0.5rem;
+        background: #0d1017;
+      }
+
+      #status {
+        font-size: 0.75rem;
+        color: var(--dim);
+        min-height: 1.2em;
+        text-align: center;
+      }
+      #status a {
+        color: inherit;
+      }
+      /* WASM の起動が終わったら読み込み表示を畳む */
+      body.ready #status {
+        opacity: 0.6;
+      }
+      #status.error {
+        color: #e05252;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="terminal"></div>
+    <p id="status">Go の WebAssembly を読み込んでいます…</p>
+
+    <!-- wasm_exec.js は Go の GOROOT からビルド時にコピーされる（scripts/build-wasm.sh） -->
+    <script src="./wasm_exec.js"></script>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
