@@ -18,6 +18,8 @@ function fail(message, err) {
   statusEl.classList.add("error");
 }
 
+const terminalEl = document.getElementById("terminal");
+
 const term = new Terminal({
   convertEol: false, // 改行の扱いは Go 側に任せる（CRLF を Go が送る）
   cursorBlink: false,
@@ -34,16 +36,21 @@ const term = new Terminal({
 // 端末の桁数はゲームの描画幅に直結するので、画面サイズ対応はこれに任せる。
 const fitAddon = new FitAddon();
 term.loadAddon(fitAddon);
-term.open(document.getElementById("terminal"));
-fitAddon.fit();
+term.open(terminalEl);
 
-new ResizeObserver(() => {
+// fit() は要素の大きさが測れないと throw しうる。ここで素通しさせると
+// モジュールの評価が止まって boot() に到達せず、画面が「読み込んでいます…」の
+// まま無言で固まるので、必ず捕まえる。
+function refit() {
   try {
     fitAddon.fit();
   } catch (err) {
     console.warn("fit に失敗", err);
   }
-}).observe(document.getElementById("terminal"));
+}
+
+refit();
+new ResizeObserver(refit).observe(terminalEl);
 
 // Go 側から呼ばれる窓口。ここに生えているものだけが Go から見える。
 globalThis.tetroTerm = {
