@@ -39,10 +39,10 @@ jobs:
       - name: ブラウザ版をビルド
         run: ./scripts/build-wasm.sh
 
+      # Pages の有効化（Source: GitHub Actions）はリポジトリ設定側で済ませてある。
+      # enablement: true はここでは使えない。Pages サイトの作成には pages: write が
+      # 要るが、このジョブは最小権限で contents: read しか持たないため。
       - uses: actions/configure-pages@v5
-        with:
-          # リポジトリ設定で Pages が未有効でも、ワークフロー側から有効化する
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
