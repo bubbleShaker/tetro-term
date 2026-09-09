@@ -1,0 +1,53 @@
+name: Deploy to GitHub Pages
+
+# main への push で自動的に再デプロイする。
+# スマートフォンからの動作確認はこの経路に頼っているため（PLAN.md 参照）、
+# ビルドは軽く保つこと。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# デプロイの取り消し合戦を避ける。進行中のものは打ち切って最新を出す。
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # go.mod に書かれたバージョンを使う。wasm_exec.js は
+          # このバージョンの GOROOT からコピーされるので、両者は必ず一致する。
+          go-version-file: go.mod
+
+      - name: テスト
+        run: go test ./...
+
+      - name: ブラウザ版をビルド
+        run: ./scripts/build-wasm.sh
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
