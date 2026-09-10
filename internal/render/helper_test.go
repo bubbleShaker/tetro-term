@@ -9,18 +9,23 @@ import (
 	"github.com/bubbleShaker/tetro-term/internal/game"
 )
 
-// frameArt はフレームを読み戻して、目で読める絵に直す。
+// painted はフレームの中の 1 文字と、そこで効いている装飾。
+type painted struct {
+	ch rune
+	st style
+}
+
+// paintedRunes はフレームを読み戻して、1 文字ずつ「そこで何色が効いているか」を返す。
 //
 // 出来上がった文字列をただ目視するのではなく**解釈し直している**のは、
 // 「塗られたセル」と「空のセル」がどちらも半角スペースで、文字だけを見ても
 // 区別がつかないからである。色を追いかけて初めて盤面の形が見える。
 //
-// 塗られているマスは '#'、塗られていないマスは '.'、枠と重ね書きの文字はそのまま。
-//
-// 文字色が指定されている空白だけは '#' にせずそのまま空白にする。文字色を使うのは
-// 重ね書きの文字だけなので、これで "GAME OVER" の中の空白が塗りつぶしと混ざらない。
-func frameArt(frame string) string {
-	var sb strings.Builder
+// 装飾を捨てて絵だけを作るのでは足りない。色が枠まで漏れていても絵の形は変わらず、
+// 「テストは通るのに画面は壊れている」が起きる。だから装飾を持ったまま返し、
+// 検査する側が形と色のどちらでも問い詰められるようにしてある。
+func paintedRunes(frame string) []painted {
+	var out []painted
 	st := plain
 
 	for _, tok := range tokenize(frame) {
@@ -29,20 +34,33 @@ func frameArt(frame string) string {
 			continue
 		}
 		for _, r := range tok.text {
-			switch {
-			case r == '\r':
+			if r == '\r' {
 				// CRLF の CR は絵には要らない。
-			case r == '\n':
-				sb.WriteRune('\n')
-			case r != ' ':
-				sb.WriteRune(r)
-			case st.fg != noColor:
-				sb.WriteRune(' ')
-			case st.bg != noColor:
-				sb.WriteRune('#')
-			default:
-				sb.WriteRune('.')
+				continue
 			}
+			out = append(out, painted{ch: r, st: st})
+		}
+	}
+	return out
+}
+
+// frameArt は paintedRunes を目で読める絵に畳む。
+//
+// 塗られているマスは '#'、塗られていないマスは '.'、枠と重ね書きの文字はそのまま。
+// 文字色が指定されている空白だけは '#' にせずそのまま空白にする。文字色を使うのは
+// 重ね書きの文字だけなので、これで "GAME OVER" の中の空白が塗りつぶしと混ざらない。
+func frameArt(frame string) string {
+	var sb strings.Builder
+	for _, p := range paintedRunes(frame) {
+		switch {
+		case p.ch != ' ':
+			sb.WriteRune(p.ch)
+		case p.st.fg != noColor:
+			sb.WriteRune(' ')
+		case p.st.bg != noColor:
+			sb.WriteRune('#')
+		default:
+			sb.WriteRune('.')
 		}
 	}
 	return strings.TrimSuffix(sb.String(), "\n")

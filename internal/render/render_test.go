@@ -93,20 +93,84 @@ func sgrBackground(color int) string {
 	return esc + "48;5;" + strconv.Itoa(color) + "m"
 }
 
-// 背景色を解除し忘れると、塗った色が枠の外や次の行まで流れ出す。
-// 解除は行末とは限らない（色が途切れたところで起きる）ので、
-// 「最後に色を指定したあと、行が終わるまでに必ず解除がある」ことを見る。
-func TestColorNeverLeaksPastTheEndOfALine(t *testing.T) {
+// 色を解除し忘れると、塗った色が枠や次の行へ流れ出す。
+//
+// 「解除のエスケープがどこかに出てくるか」を見るのでは足りない。解除が閉じ枠より
+// **後ろ**にあっても文字列の中には存在してしまうし、絵の形も変わらないので、
+// 形だけを見るテストはすり抜ける。枠そのものが何色で描かれたかを直接問う。
+func TestBorderIsNeverPainted(t *testing.T) {
+	// 塗られたセルが枠に接している状態で試す。**両端とも試すことに意味がある**。
+	// 右端は「行の最後の文字が塗られたまま終わる」唯一の場合で、行末の解除を
+	// 落とすとここだけが壊れる。左端で試しても、色は途中で切れるので気づけない。
+	for _, tt := range []struct {
+		name string
+		move game.Input
+	}{
+		{"左端に寄せる", game.MoveLeft},
+		{"右端に寄せる", game.MoveRight},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			g := newGame(game.O)
+			for i := 0; i < game.Width; i++ {
+				g.Handle(tt.move)
+			}
+
+			for i, p := range paintedRunes(Frame(g)) {
+				if !strings.ContainsRune("+-|", p.ch) {
+					continue
+				}
+				if p.st != plain {
+					t.Fatalf("%d 文字目の枠 %q に装飾 %+v が乗っている（色が漏れている）",
+						i, p.ch, p.st)
+				}
+			}
+		})
+	}
+}
+
+// 行をまたいで色が残っていないこと。
+func TestColorDoesNotSurviveIntoTheNextLine(t *testing.T) {
 	g := newGame(game.O)
 
-	for i, line := range strings.Split(Frame(g), crlf) {
-		last := strings.LastIndex(line, esc+"48;5;")
-		if last < 0 {
-			continue
+	for i, p := range paintedRunes(Frame(g)) {
+		if p.ch == '\n' && p.st != plain {
+			t.Fatalf("%d 文字目の改行に装飾 %+v が残っている", i, p.st)
 		}
-		if !strings.Contains(line[last:], resetGraphic) {
-			t.Errorf("%d 行目が色を解除しないまま終わっている: %q", i, line)
-		}
+	}
+}
+
+// フレームのバイト列そのものを固定する。
+//
+// ほかのテストは frameArt でエスケープを解釈し直してから検査しているが、それだと
+// 「レンダラと読み戻しの両方が同じように間違っている」場合に気づけない。
+// ここだけは 1 バイトも解釈せずに突き合わせる。
+func TestFrameIsExactlyThisString(t *testing.T) {
+	const (
+		border   = "+--------------------+"
+		emptyRow = "|                    |"
+		// O ミノが出ている行。色を変える手前で必ず装飾を解除している。
+		oRow = "|        " + resetGraphic + esc + "48;5;226m" + "    " + resetGraphic + "        |"
+	)
+
+	want := cursorHome +
+		border + crlf +
+		oRow + crlf +
+		oRow + crlf +
+		strings.Repeat(emptyRow+crlf, game.Height-2) +
+		border
+
+	if got := Frame(newGame(game.O)); got != want {
+		t.Errorf("フレームが違う\n--- got ---\n%q\n--- want ---\n%q", got, want)
+	}
+}
+
+// 最終行に改行を付けると、端末の高さがちょうどフレームの高さのときに 1 行スクロールする。
+// フレームはカーソルを左上へ戻して上書きするだけなので、一度ずれると直らない。
+func TestFrameDoesNotEndWithANewline(t *testing.T) {
+	frame := Frame(newGame(game.O))
+
+	if strings.HasSuffix(frame, crlf) || strings.HasSuffix(frame, "\n") {
+		t.Errorf("フレームが改行で終わっている: %q", frame[len(frame)-8:])
 	}
 }
 
@@ -202,7 +266,15 @@ func TestEnterAndLeaveArePaired(t *testing.T) {
 	if !strings.Contains(Enter(), clearScreen) {
 		t.Error("Enter が画面を消していない")
 	}
+	if !strings.Contains(Enter(), resetGraphic) {
+		t.Error("Enter が装飾を解除していない（起動前のシェルの色が残る）")
+	}
 	if !strings.Contains(Leave(), resetGraphic) {
 		t.Error("Leave が装飾を解除していない")
+	}
+
+	// 最後のフレームには GAME OVER が出ている。出ぎわに消すと読む間もなく消える。
+	if strings.Contains(Leave(), clearScreen) {
+		t.Error("Leave が画面を消している（最後の画をプレイヤーが読めなくなる）")
 	}
 }

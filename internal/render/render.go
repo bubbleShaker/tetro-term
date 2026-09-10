@@ -53,6 +53,13 @@ var minoColor = map[game.MinoKind]int{
 	game.L: 208, // 橙
 }
 
+// 盤面へ重ねる文字の色。ミノの色と同じく、決めるのはこのファイルの中だけ。
+// 下に何色のミノが積まれていても読めるよう、文字自身が背景ごと塗り替える。
+const (
+	overlayFG = 231 // ほぼ白
+	overlayBG = 16  // ほぼ黒
+)
+
 // gameOverText はゲームオーバー時に盤面へ重ねる文字。前後の空白は、
 // 下にあるミノと文字がくっついて読みにくくなるのを避けるためのもの。
 const gameOverText = " GAME OVER "
@@ -64,6 +71,10 @@ func init() {
 		if _, ok := minoColor[kind]; !ok {
 			panic(fmt.Sprintf("render: %v の色が決まっていない", kind))
 		}
+	}
+	// 盤面より長い文字は重ねられない。重ねようとすると盤面の外を書きに行って落ちる。
+	if n := len([]rune(gameOverText)); n > boardWidth {
+		panic(fmt.Sprintf("render: 重ねる文字が %d 文字あり、盤面の幅 %d に収まらない", n, boardWidth))
 	}
 }
 
@@ -91,16 +102,23 @@ const boardWidth = game.Width * cellWidth
 //
 // フレームはカーソルを左上へ戻して上書きするだけなので、画面を消すのはここで一度きり。
 // 毎フレーム消すとちらつく。
+//
+// 先に装飾を解除するのは、ゲームを起動した時点のシェルに色が残っていることがあるため。
+// 解除しないと、レンダラが何も塗っていない枠や空きマスがその色のまま出続ける。
 func Enter() string {
-	return clearScreen + hideCursor + cursorHome
+	return resetGraphic + clearScreen + hideCursor + cursorHome
 }
 
 // Leave は画面から出るときに流す文字列を返す。
 //
 // Enter で隠したカーソルを必ず戻す。戻し忘れると、ゲームを終えたあとの端末で
 // カーソルが見えないままになる。Enter とは必ず対で呼ぶこと。
+//
+// **画面は消さない**。最後のフレームには GAME OVER が出ているのに、出ぎわに消すと
+// プレイヤーはそれを読む間もなくシェルに戻される。最後の画を残したまま、
+// その下から続きを始められるように改行だけ足す。
 func Leave() string {
-	return resetGraphic + showCursor + clearScreen + cursorHome
+	return resetGraphic + showCursor + crlf
 }
 
 // Frame は 1 描画分のフレームを返す（→ CONTEXT.md「フレーム」）。
@@ -122,7 +140,11 @@ func Frame(g *game.Game) string {
 		writeRow(&sb, row[:])
 		sb.WriteString("|" + crlf)
 	}
-	sb.WriteString(border + crlf)
+	// 最後の行には改行を付けない。付けるとカーソルが 1 行下へ進み、端末の高さが
+	// ちょうどフレームの高さだったときに画面が 1 行ぶんスクロールしてしまう。
+	// フレームはカーソルを左上へ戻して上書きするだけなので、一度ずれると
+	// 以降ずっとずれたまま描き続けることになる。
+	sb.WriteString(border)
 
 	return sb.String()
 }
@@ -174,7 +196,7 @@ func overlayText(cells *[game.Height][boardWidth]glyph, text string) {
 	row := game.Height / 2
 	// 文字は下にあるミノの色を受け継がず、自前の色で塗る。そうしないと、
 	// 積み上がり方によって読めたり読めなかったりする。
-	st := style{fg: 231, bg: 16}
+	st := style{fg: overlayFG, bg: overlayBG}
 	for i, r := range runes {
 		cells[row][left+i] = glyph{ch: r, st: st}
 	}
