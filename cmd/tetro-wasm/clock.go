@@ -1,9 +1,9 @@
 // **このファイルにはビルドタグを付けない。**
 //
 // 同じパッケージの main.go は js/wasm 専用なので、ホストの go test からは見えない。
-// ブラウザに触らない判断——時間をどう進めるか、いつ画面を送るか——をこちらへ分けておくと、
+// ブラウザに触らない判断——ここでは「時間をどう進めるか」——をこちらへ分けておくと、
 // その部分だけは普通にテストできる。ここに syscall/js を持ち込んだ瞬間に、
-// この性質は失われる。
+// この性質は失われる（同じ理由で screen.go も分けてある）。
 //
 // ホストで go build ./... だけは「func main が無い」と言って落ちるが、
 // CI が回すのはテストと js/wasm 向けの vet とブラウザ版のビルドだけなので支障はない。
@@ -37,27 +37,4 @@ func clampDelta(d time.Duration) time.Duration {
 	default:
 		return d
 	}
-}
-
-// screen は直前に送ったフレームを覚えておき、同じ絵を 2 度送らないようにする。
-//
-// 描画は毎フレーム（60 回/秒）呼ばれるが、実際に絵が変わるのはミノが動いたときだけで、
-// 重力に至っては 800ms に 1 回しかない。同じ 1KB の文字列を秒 60 回 xterm.js へ
-// 流し込む意味はない。
-//
-// これは render の「差分描画はしない」という方針と矛盾しない。レンダラは相変わらず
-// 毎回まるごと組み立てる。**同じものを 2 度送らないのはドライバの判断**である。
-type screen struct {
-	last string
-	sent bool
-}
-
-// shouldSend は今回組み立てたフレームを送るべきかを返し、送るなら覚え直す。
-func (s *screen) shouldSend(frame string) bool {
-	if s.sent && frame == s.last {
-		return false
-	}
-	s.last = frame
-	s.sent = true
-	return true
 }

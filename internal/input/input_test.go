@@ -1,6 +1,7 @@
 package input
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/bubbleShaker/tetro-term/internal/game"
@@ -158,6 +159,58 @@ func assertActions(t *testing.T, got, want []Action) {
 	for i := range got {
 		if got[i] != want[i] {
 			t.Errorf("%d 個目が %+v、期待は %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// 操作説明が、実際に割り当てられているキーを漏れなく説明していること。
+//
+// キーを足して説明を忘れる、あるいは割り当てを消したのに説明が残る——どちらも
+// プログラムは動き続けるので、見張らないと気づけない。
+func TestKeyHelpDescribesEveryBinding(t *testing.T) {
+	// どのキーで届くかも控えておく。game.Input は数値なので、そのまま報告しても
+	// 「3 が説明されていない」としか読めない。
+	bound := map[game.Input][]string{}
+	for _, table := range []map[byte]Action{singleByte, arrow} {
+		for key, action := range table {
+			if action.Input != game.InputNone {
+				bound[action.Input] = append(bound[action.Input], string(rune(key)))
+			}
+		}
+	}
+
+	described := map[game.Input]bool{}
+	for _, h := range keyHelp {
+		for _, in := range h.inputs {
+			if described[in] {
+				t.Errorf("%v が操作説明に 2 度出てくる", in)
+			}
+			described[in] = true
+		}
+	}
+
+	for in, keys := range bound {
+		if !described[in] {
+			t.Errorf("キー %v が操作 %d に割り当たっているのに、操作説明に出てこない", keys, in)
+		}
+	}
+	for in := range described {
+		if bound[in] == nil {
+			t.Errorf("操作 %d を操作説明が挙げているが、どのキーにも割り当たっていない", in)
+		}
+	}
+}
+
+// 説明はそのまま画面に出す 1 行なので、空だったり途中で切れていたりしないこと。
+func TestKeyHelpIsASingleReadableLine(t *testing.T) {
+	got := KeyHelp()
+
+	if strings.ContainsAny(got, "\r\n") {
+		t.Errorf("操作説明が 1 行に収まっていない: %q", got)
+	}
+	for _, h := range keyHelp {
+		if !strings.Contains(got, h.keys) || !strings.Contains(got, h.what) {
+			t.Errorf("操作説明に %q %q が出てこない: %q", h.keys, h.what, got)
 		}
 	}
 }

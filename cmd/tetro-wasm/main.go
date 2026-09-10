@@ -47,6 +47,17 @@ func (t terminal) write(s string) {
 	t.obj.Call("write", s)
 }
 
+// setup は起動を終えた Go が JS へ手渡すもの一式（→ terminal.ready）。
+//
+// ばらばらの引数ではなく 1 つの型にしてあるのは、JS 側のキー名との対応を
+// 1 か所に閉じ込めるため。増えるたびに引数が伸びていく形だと、
+// 呼び出し側で順番を取り違えても気づけない。
+type setup struct {
+	cols, rows int
+	help       string
+	tick, data js.Func
+}
+
 // ready は「Go の起動が終わった」ことを伝え、**同時に JS から Go を呼ぶ窓口を渡す**。
 //
 // 窓口をグローバルへ生やさず引数で渡しているのは、「準備ができた」と
@@ -54,14 +65,16 @@ func (t terminal) write(s string) {
 // JS 側は必ず「もう生えているか」を確かめる手順を持つことになり、
 // その確認は書き忘れても大抵は動いてしまう類のコードになる。
 //
-// cols と rows を一緒に渡すのは、端末をフレームぴったりの大きさで作らせるため。
-// 桁数を JS 側に書くと、盤面やセルの幅を変えたときに片方だけ古いまま残る。
-func (t terminal) ready(cols, rows int, tick, data js.Func) {
+// 寸法と操作説明を一緒に渡すのは、**どちらも JS 側が持つべきでない知識**だからである。
+// 桁数を JS に書けば盤面の大きさを変えたときに片方だけ古くなり、キーの説明を JS に
+// 書けば割り当てを変えたときに説明だけ古くなる。どちらも動き続けるので誰も気づかない。
+func (t terminal) ready(s setup) {
 	t.obj.Call("ready", map[string]any{
-		"cols": cols,
-		"rows": rows,
-		"tick": tick,
-		"data": data,
+		"cols": s.cols,
+		"rows": s.rows,
+		"help": s.help,
+		"tick": s.tick,
+		"data": s.data,
 	})
 }
 
@@ -79,7 +92,7 @@ type driver struct {
 	term     terminal
 	game     *game.Game
 	decoder  input.Decoder
-	screen   screen
+	screen   frameGate
 	notified bool // gameOver を伝えたか
 }
 
@@ -143,7 +156,7 @@ func main() {
 	// **描くより先に ready を呼ぶ**。JS はこの呼び出しの中で端末をフレームぴったりの
 	// 大きさに作り替えるので、先に描くとその絵はリサイズで巻き込まれうる。そして
 	// 描き直しは来ない——次の tick が組み立てるフレームは消える前とまったく同じ絵で、
-	// screen が「送る必要なし」と判断してしまうからである。
+	// frameGate が「送る必要なし」と判断してしまうからである。
 	//
 	// ready が戻ってから下の write までの間に requestAnimationFrame が割り込む心配は
 	// 要らない。Go のインスタンスが JS へ制御を返すのは全ゴルーチンが止まったときだけで、
@@ -152,10 +165,13 @@ func main() {
 	// js.FuncOf で作った関数は本来 Release が要るが、この 2 つはタブが閉じるまで
 	// 呼ばれ続ける。解放するのは「もう呼ばれない」と決まったときで、その瞬間は来ない。
 	cols, rows := render.Size()
-	d.term.ready(cols, rows,
-		callback(func(v js.Value) { d.tick(v.Float()) }),
-		callback(func(v js.Value) { d.data(v.String()) }),
-	)
+	d.term.ready(setup{
+		cols: cols,
+		rows: rows,
+		help: input.KeyHelp(),
+		tick: callback(func(v js.Value) { d.tick(v.Float()) }),
+		data: callback(func(v js.Value) { d.data(v.String()) }),
+	})
 
 	// 画面へ入る。CLI 版と違い、対になる render.Leave() は呼ばない——
 	// ブラウザには「出ていく」瞬間が存在しないからである。カーソルを隠したまま

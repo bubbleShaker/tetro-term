@@ -17,8 +17,6 @@ const statusEl = document.getElementById("status");
 const stageEl = document.getElementById("stage");
 const terminalEl = document.getElementById("terminal");
 
-const KEY_HELP = "←→ 移動  ↑ 回転  z 反時計回り  ↓ ソフトドロップ";
-
 function fail(message, err) {
   console.error(err);
   statusEl.textContent = `${message}: ${err?.message ?? err}`;
@@ -62,7 +60,13 @@ function fitScale() {
   terminalEl.style.transform = `scale(${scale})`;
 }
 
-new ResizeObserver(fitScale).observe(stageEl);
+// 入れ物と端末の**両方**を見る。
+// 入れ物は窓の大きさが変われば変わり、端末はフォントが確定して 1 文字の実寸が
+// 決まり直せば変わる。片方しか見ていないと、もう片方が動いたときに倍率が古いまま残る。
+// transform は行の組み直しを起こさないので、この観測が自分自身を呼び戻すことはない。
+const observer = new ResizeObserver(fitScale);
+observer.observe(stageEl);
+observer.observe(terminalEl);
 
 // Go 側から呼ばれる窓口。ここに生えているものだけが Go から見える。
 globalThis.tetroTerm = {
@@ -80,7 +84,7 @@ globalThis.tetroTerm = {
 //
 // 窓口を受け取るのと「準備ができた」を知るのが同じ 1 回なので、準備前に tick を
 // 呼んでしまう順序を気にしなくてよい。
-function start({ cols, rows, tick, data }) {
+function start({ cols, rows, help, tick, data }) {
   // フレームぴったりの大きさにする。この値は Go の render.Size から来ており、
   // こちら側は 22 という数字を知らない。
   term.resize(cols, rows);
@@ -88,8 +92,10 @@ function start({ cols, rows, tick, data }) {
   // **拡縮より先に文章を確定させる**。狭い画面ではこの一行が 2 行にも 3 行にも折り返し、
   // その分だけ端末に使える高さが減る。先に測ってしまうと、増えた行数のぶんだけ
   // 端末が縦にはみ出す。
+  // 操作説明も Go から来る。キーの割り当てを持っているのは internal/input だけで、
+  // ここはそれを映すだけ。JS が独自に書くと、割り当てを変えたとき説明だけ古くなる。
   document.body.classList.add("ready");
-  statusEl.textContent = KEY_HELP;
+  statusEl.textContent = help;
 
   fitScale();
 

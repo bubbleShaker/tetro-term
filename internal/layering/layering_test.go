@@ -48,6 +48,7 @@ var rules = []rule{
 			"送ってくるので、M2 のブラウザ版はここをそのまま使い回す。" +
 			"golang.org/x/term のような端末専用のものが現れたら、その前提が壊れる",
 		allowed: []string{
+			"strings",
 			"github.com/bubbleShaker/tetro-term/internal/game",
 		},
 	},
