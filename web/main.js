@@ -1,24 +1,27 @@
-// ブラウザ側の起動処理。
+// ブラウザ側のドライバの、JS が受け持つ半分。
 //
-// 役割は2つだけ:
-//   1. xterm.js のターミナルを1つ用意する
-//   2. Go の WASM を起動し、Go から呼べる窓口 (globalThis.tetroTerm) を渡す
+// 役割は4つだけ:
+//   1. xterm.js のターミナルを1つ用意し、Go が言ってきた大きさに合わせる
+//   2. 時間を測って Go の tick を呼ぶ（requestAnimationFrame）
+//   3. 端末が受け取ったバイト列を Go の data へそのまま渡す
+//   4. 端末にフォーカスを持たせ続ける
 //
-// ゲームのロジックはすべて Go 側にあり、この JS はそれを映す画面でしかない
-// （docs/adr/0001-ansi-frame-as-the-only-boundary.md）。
+// **ゲームのルールはここに一切無い**（docs/adr/0001）。キーが何を意味するかすら
+// 知らない——矢印キーのバイト列を操作に読み替えるのは Go 側の internal/input で、
+// CLI 版とまったく同じコードが通る。ここに「左キーなら…」と書き始めたら、
+// その時点で CLI 版との一致は構造ではなく注意力の問題に変わる。
 
 import { Terminal } from "./vendor/xterm.mjs";
-import { FitAddon } from "./vendor/addon-fit.mjs";
 
 const statusEl = document.getElementById("status");
+const stageEl = document.getElementById("stage");
+const terminalEl = document.getElementById("terminal");
 
 function fail(message, err) {
   console.error(err);
   statusEl.textContent = `${message}: ${err?.message ?? err}`;
   statusEl.classList.add("error");
 }
-
-const terminalEl = document.getElementById("terminal");
 
 const term = new Terminal({
   convertEol: false, // 改行の扱いは Go 側に任せる（CRLF を Go が送る）
@@ -32,34 +35,93 @@ const term = new Terminal({
   },
 });
 
-// FitAddon: コンテナの大きさから端末の桁数・行数を割り出してくれるアドオン。
-// 端末の桁数はゲームの描画幅に直結するので、画面サイズ対応はこれに任せる。
-const fitAddon = new FitAddon();
-term.loadAddon(fitAddon);
 term.open(terminalEl);
 
-// fit() は要素の大きさが測れないと throw しうる。ここで素通しさせると
-// モジュールの評価が止まって boot() に到達せず、画面が「読み込んでいます…」の
-// まま無言で固まるので、必ず捕まえる。
-function refit() {
-  try {
-    fitAddon.fit();
-  } catch (err) {
-    console.warn("fit に失敗", err);
-  }
+// 端末を画面に収める。
+//
+// 桁数・行数は盤面に合わせて固定なので（Go の render.Size が決める）、収めるほうは
+// 拡縮で行う。画面の広さに合わせて桁数を変える FitAddon は、盤面が固定である以上
+// 逆向きの道具になったので使っていない。
+//
+// xterm の fontSize は触らず、要素ごと CSS の transform で拡縮する。fontSize を
+// 計算する方式はセル幅と行高の丸めを自分で当てにいくことになり、1 桁はみ出す事故が
+// 起きやすい（実寸は xterm の私有 API を覗かないと正確に取れない）。
+// transform は文字を再ラスタライズするのでぼやけない。
+function fitScale() {
+  // offsetWidth / offsetHeight は transform の影響を受けない＝拡縮前の実寸が取れる。
+  const naturalWidth = terminalEl.offsetWidth;
+  const naturalHeight = terminalEl.offsetHeight;
+  if (!naturalWidth || !naturalHeight) return;
+
+  const scale = Math.min(
+    stageEl.clientWidth / naturalWidth,
+    stageEl.clientHeight / naturalHeight,
+  );
+  terminalEl.style.transform = `scale(${scale})`;
 }
 
-refit();
-new ResizeObserver(refit).observe(terminalEl);
+// 入れ物と端末の**両方**を見る。
+// 入れ物は窓の大きさが変われば変わり、端末はフォントが確定して 1 文字の実寸が
+// 決まり直せば変わる。片方しか見ていないと、もう片方が動いたときに倍率が古いまま残る。
+// transform は行の組み直しを起こさないので、この観測が自分自身を呼び戻すことはない。
+const observer = new ResizeObserver(fitScale);
+observer.observe(stageEl);
+observer.observe(terminalEl);
 
 // Go 側から呼ばれる窓口。ここに生えているものだけが Go から見える。
 globalThis.tetroTerm = {
   write: (s) => term.write(s),
-  ready: () => {
-    document.body.classList.add("ready");
-    statusEl.textContent = "M0: Go → WASM → xterm.js の経路が通っています";
+  ready: (handlers) => start(handlers),
+  gameOver: () => {
+    // M2 にリスタートは無い（M7 / #8）。行き先はリロードしかないので、そう言う。
+    statusEl.textContent = "GAME OVER — リロードでもう一度遊べます";
+    // 文章の行数が変われば端末に使える高さも変わる（→ start の順序についてのコメント）。
+    fitScale();
   },
 };
+
+// start は Go の準備が終わったときに呼ばれる。tick と data はどちらも Go の関数。
+//
+// 窓口を受け取るのと「準備ができた」を知るのが同じ 1 回なので、準備前に tick を
+// 呼んでしまう順序を気にしなくてよい。
+function start({ cols, rows, help, tick, data }) {
+  // フレームぴったりの大きさにする。この値は Go の render.Size から来ており、
+  // こちら側は 22 という数字を知らない。
+  term.resize(cols, rows);
+
+  // **拡縮より先に文章を確定させる**。狭い画面ではこの一行が 2 行にも 3 行にも折り返し、
+  // その分だけ端末に使える高さが減る。先に測ってしまうと、増えた行数のぶんだけ
+  // 端末が縦にはみ出す。
+  // 操作説明も Go から来る。キーの割り当てを持っているのは internal/input だけで、
+  // ここはそれを映すだけ。JS が独自に書くと、割り当てを変えたとき説明だけ古くなる。
+  document.body.classList.add("ready");
+  statusEl.textContent = help;
+
+  fitScale();
+
+  // 端末が受け取ったバイト列をそのまま Go へ。ここで意味を与えない。
+  term.onData(data);
+
+  // フォーカスが端末から外れると、矢印キーはページのスクロールに戻ってしまう。
+  // 端末が持っている間は xterm が飲み込んでくれるので、常に持たせておく。
+  // pointerdown ではなく click で拾うのは、フォーカスの既定の移動が先に起きてから
+  // 戻したいためである（先に戻すと、そのあと body へ持っていかれる）。
+  term.focus();
+  document.addEventListener("click", () => term.focus());
+
+  // ここが時間の出どころになる。Go 側に時計は無く、渡されたミリ秒だけを信じる。
+  //
+  // requestAnimationFrame を使うのは、背面タブでこれが止まるからである。setTimeout は
+  // 1 秒に 1 回まで絞られるだけで止まらず、その間に溜まった時間をコアへ渡すと
+  // 戻ってきた瞬間にミノが何段も落ちる（Go 側の clock.go も上限で押さえている）。
+  let last = performance.now();
+  function step(now) {
+    tick(now - last);
+    last = now;
+    requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
 
 async function boot() {
   if (typeof globalThis.Go !== "function") {

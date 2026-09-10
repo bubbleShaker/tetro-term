@@ -48,6 +48,17 @@ var rules = []rule{
 			"送ってくるので、M2 のブラウザ版はここをそのまま使い回す。" +
 			"golang.org/x/term のような端末専用のものが現れたら、その前提が壊れる",
 		allowed: []string{
+			"strings",
+			"github.com/bubbleShaker/tetro-term/internal/game",
+		},
+	},
+	{
+		dir: "../draw",
+		why: "抽選が知っていてよいのは乱数とコアだけである。ここに端末やブラウザのものが" +
+			"現れたら、CLI 版とブラウザ版が同じ抽選を通るという前提が崩れる。" +
+			"コアの側に math/rand を置けないからこのパッケージがある（→ draw.go）",
+		allowed: []string{
+			"math/rand/v2",
 			"github.com/bubbleShaker/tetro-term/internal/game",
 		},
 	},

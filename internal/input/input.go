@@ -7,7 +7,11 @@
 // 入口側の境界も「バイト列ひとつ」に寄せてある。
 package input
 
-import "github.com/bubbleShaker/tetro-term/internal/game"
+import (
+	"strings"
+
+	"github.com/bubbleShaker/tetro-term/internal/game"
+)
 
 // Action はドライバが受け取る操作ひとつ。
 //
@@ -55,6 +59,35 @@ var arrow = map[byte]Action{
 	'B': {Input: game.SoftDrop},  // ↓
 	'C': {Input: game.MoveRight}, // →
 	'D': {Input: game.MoveLeft},  // ←
+}
+
+// keyHelp は画面に出す操作説明。
+//
+// **割り当ての表のすぐ隣に置いてある**。プレイヤーに見せる説明を別のファイルや
+// 別の言語（ブラウザ版の JS）に置くと、キーを足したときに説明だけ古くなる。
+// しかも古い説明は動くので、誰も気づかない。取りこぼしは
+// TestKeyHelpDescribesEveryBinding が見張る。
+//
+// 終了（q / Ctrl-C）を載せていないのは、これがゲームへの入力ではなくドライバへの
+// 合図であり、ブラウザ版では何も起きないためである（→ Action）。
+var keyHelp = []struct {
+	keys   string
+	what   string
+	inputs []game.Input
+}{
+	{"←→", "移動", []game.Input{game.MoveLeft, game.MoveRight}},
+	{"↑", "回転", []game.Input{game.RotateCW}},
+	{"z", "反時計回り", []game.Input{game.RotateCCW}},
+	{"↓", "ソフトドロップ", []game.Input{game.SoftDrop}},
+}
+
+// KeyHelp は割り当てられているキーの一覧を、そのまま画面に出せる 1 行にする。
+func KeyHelp() string {
+	parts := make([]string, 0, len(keyHelp))
+	for _, h := range keyHelp {
+		parts = append(parts, h.keys+" "+h.what)
+	}
+	return strings.Join(parts, "  ")
 }
 
 // Decoder はバイト列を操作の列に読み替える。

@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand/v2"
 	"os"
 	"os/signal"
 	"syscall"
@@ -22,6 +21,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/bubbleShaker/tetro-term/internal/draw"
 	"github.com/bubbleShaker/tetro-term/internal/game"
 	"github.com/bubbleShaker/tetro-term/internal/input"
 	"github.com/bubbleShaker/tetro-term/internal/render"
@@ -87,7 +87,7 @@ func run() error {
 
 // play はゲームが終わるまで回り続ける。
 func play(signals <-chan os.Signal) error {
-	g := game.New(randomDraw())
+	g := game.New(draw.Uniform())
 
 	keys := readAll(os.Stdin)
 	var decoder input.Decoder
@@ -160,21 +160,6 @@ func readAll(r io.Reader) <-chan []byte {
 	}()
 
 	return chunks
-}
-
-// randomDraw は次のミノを一様な乱数で選ぶ（→ CONTEXT.md「抽選」）。
-//
-// 同じミノが何度も続いて理不尽になるのを直すのは M5（#6）の 7バッグ。
-// コアには手が入らず、差し替わるのは抽選の中身だけである。
-//
-// ただし M2 でブラウザ版の入口ができると、同じものがそちらにも要る。**7バッグを
-// 入れる時点で、抽選は両方の入口から使える場所へ移すことになる**（テストも要る）。
-// いまここに置いてあるのは、使う人がまだ 1 人しかいないからにすぎない。
-func randomDraw() func() game.MinoKind {
-	kinds := game.AllKinds()
-	return func() game.MinoKind {
-		return kinds[rand.IntN(len(kinds))]
-	}
 }
 
 // write はフレームを画面へ流す。
