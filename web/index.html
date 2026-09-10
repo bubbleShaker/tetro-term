@@ -42,10 +42,24 @@
         overflow: hidden;
       }
 
-      #terminal {
-        width: min(100%, 68ch);
+      /* #stage は「端末を置ける広さ」を表すだけの入れ物。
+         端末は桁数・行数が固定なので伸び縮みできず、代わりに JS が
+         transform: scale() でこの広さに合わせて拡縮する（web/main.js）。
+         はみ出しを隠すのは、拡縮が間に合わない一瞬のためのもの。 */
+      #stage {
         flex: 1 1 auto;
         min-height: 0;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+
+      #terminal {
+        /* 縮められるとフォントの実寸が測れなくなり、拡縮の計算が狂う。
+           大きさはあくまで xterm が決め、flex には触らせない。 */
+        flex: 0 0 auto;
         /* 端末らしい枠。ゲーム画面が主役なので装飾は最小限に留める */
         border: 1px solid #1c2230;
         border-radius: 6px;
@@ -72,7 +86,7 @@
     </style>
   </head>
   <body>
-    <div id="terminal"></div>
+    <div id="stage"><div id="terminal"></div></div>
     <p id="status">Go の WebAssembly を読み込んでいます…</p>
 
     <!-- wasm_exec.js は Go の GOROOT からビルド時にコピーされる（scripts/build-wasm.sh） -->

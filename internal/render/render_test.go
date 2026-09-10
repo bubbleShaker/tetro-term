@@ -278,3 +278,21 @@ func TestEnterAndLeaveArePaired(t *testing.T) {
 		t.Error("Leave が画面を消している（最後の画をプレイヤーが読めなくなる）")
 	}
 }
+
+// Size が返す寸法は、ブラウザ版が端末を作るときの唯一の根拠になる。
+// 実際のフレームを数えて突き合わせるので、盤面の大きさやセルの幅を変えたときに
+// Size だけ古いまま残ることがない。
+func TestSizeMatchesTheActualFrame(t *testing.T) {
+	cols, rows := Size()
+
+	lines := strings.Split(frameArt(Frame(newGame(game.O))), "\n")
+
+	if len(lines) != rows {
+		t.Errorf("Size は %d 行と言うが、フレームは %d 行ある", rows, len(lines))
+	}
+	for i, line := range lines {
+		if got := len([]rune(line)); got != cols {
+			t.Errorf("Size は %d 桁と言うが、%d 行目は %d 桁ある: %q", cols, i, got, line)
+		}
+	}
+}

@@ -52,6 +52,16 @@ var rules = []rule{
 		},
 	},
 	{
+		dir: "../draw",
+		why: "抽選が知っていてよいのは乱数とコアだけである。ここに端末やブラウザのものが" +
+			"現れたら、CLI 版とブラウザ版が同じ抽選を通るという前提が崩れる。" +
+			"コアの側に math/rand を置けないからこのパッケージがある（→ draw.go）",
+		allowed: []string{
+			"math/rand/v2",
+			"github.com/bubbleShaker/tetro-term/internal/game",
+		},
+	},
+	{
 		dir: "../render",
 		why: "レンダラは盤面を文字列に直すだけで、その文字列をどこへ流すかは知らない。" +
 			"端末やブラウザに触るものが現れたら、CLI 版とブラウザ版で同じ画が出る保証が崩れる。" +
