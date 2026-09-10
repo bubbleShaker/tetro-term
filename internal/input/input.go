@@ -24,10 +24,21 @@ type Action struct {
 // 「キーを離した」を伝えてくれないため（→ PLAN.md の制約）。連続移動は
 // OS のキーリピートに委ねる。
 const (
-	escByte    = 0x1b // ESC。矢印キーはこれで始まる 3 バイトの並びとして届く
-	ctrlC      = 0x03 // raw mode では Ctrl-C が SIGINT にならず、この 1 バイトが届く
-	csiBracket = '['  // ESC に続く「[」。ここまでが矢印キーの前置き
+	escByte = 0x1b // ESC。矢印キーはこれで始まる並びとして届く
+	ctrlC   = 0x03 // raw mode では Ctrl-C が SIGINT にならず、この 1 バイトが届く
+
+	// 矢印キーの前置きには 2 通りある。ふだんは ESC [ だが、端末が
+	// application cursor key mode に入っていると ESC O になる。どちらで来ても
+	// 同じキーなので両方受ける。片方しか見ないと、設定次第で矢印が全部効かなくなる。
+	csiBracket = '['
+	ss3Letter  = 'O'
 )
+
+// maxSequence は 1 つの並びとして待つバイト数の上限。
+//
+// 終わりの来ない並びを延々と溜め込まないための歯止め。ここが無いと、壊れた
+// 入力を渡されたときに持ち越しが際限なく膨らむ。
+const maxSequence = 32
 
 // singleByte は 1 バイトで決まるキー。
 var singleByte = map[byte]Action{
@@ -89,19 +100,57 @@ func decodeOne(b []byte) (Action, int, bool) {
 		return action, 1, ok
 	}
 
-	// ここから矢印キーの可能性がある並び。
 	if len(b) < 2 {
 		return Action{}, 0, false // ESC だけ届いた。続きを待つ
 	}
-	if b[1] != csiBracket {
+
+	switch b[1] {
+	case csiBracket:
+		return decodeCSI(b)
+	case ss3Letter:
+		if len(b) < 3 {
+			return Action{}, 0, false
+		}
+		action, ok := arrow[b[2]]
+		return action, 3, ok
+	default:
 		// ESC に別のキーが続いた（Alt + 何か など）。割り当てが無いので ESC だけ捨てる。
 		// まとめて捨てないのは、続きのバイトが単体で意味を持つキーかもしれないため。
 		return Action{}, 1, false
 	}
-	if len(b) < 3 {
-		return Action{}, 0, false // ESC [ まで届いた。続きを待つ
+}
+
+// decodeCSI は ESC [ で始まる並びを 1 つ読む。
+//
+// この形の並びは「引数バイトと中間バイトが任意個続き、最後に終端バイトで終わる」と
+// 決まっている。長さを 3 バイト決め打ちにすると、Ctrl+← のような修飾付きの並び
+// （ESC [ 1 ; 5 D）で余りが出て、その残骸が別のキーとして読まれてしまう。
+// 終端バイトまで数えて、まとめて 1 つとして扱う。
+func decodeCSI(b []byte) (Action, int, bool) {
+	for i := 2; i < len(b); i++ {
+		switch c := b[i]; {
+		case c >= 0x30 && c <= 0x3f, c >= 0x20 && c <= 0x2f:
+			// 引数バイトと中間バイト。まだ続く。
+
+		case c >= 0x40 && c <= 0x7e:
+			// 終端バイト。ここで並びが終わる。
+			// 矢印は「引数が何も付いていない」ものだけを受ける。修飾キー付きは
+			// 割り当てが無いので、並び全体を読み飛ばす。
+			if i == 2 {
+				action, ok := arrow[c]
+				return action, 3, ok
+			}
+			return Action{}, i + 1, false
+
+		default:
+			// 決まりから外れたバイト。ここまでを捨てて、そこから読み直す。
+			return Action{}, i, false
+		}
 	}
 
-	action, ok := arrow[b[2]]
-	return action, 3, ok
+	if len(b) >= maxSequence {
+		// 終わりの見えない並び。ESC を 1 バイト捨てて読み直す。
+		return Action{}, 1, false
+	}
+	return Action{}, 0, false // 終端がまだ届いていない
 }

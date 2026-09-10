@@ -57,19 +57,29 @@ func run() error {
 		return fmt.Errorf("端末を raw mode にできない: %w", err)
 	}
 	// **あらゆる終了経路がここを通る**。通らずに終わると、端末はキーをエコーしないまま
-	// 返り、ユーザーのシェルが壊れたように見える。
-	defer term.Restore(fd, state)
+	// 返り、ユーザーのシェルが壊れたように見える。panic で巻き戻るときも通る。
+	defer func() {
+		if err := term.Restore(fd, state); err != nil {
+			// もう画面は当てにできないので標準エラーへ。黙って戻せないまま終わると、
+			// ユーザーは何が起きたか分からないまま壊れた端末を渡される。
+			fmt.Fprintln(os.Stderr, "tetro: 端末を元に戻せなかった:", err)
+		}
+	}()
 
 	// Leave は raw mode のうちに書く必要がある（改行が CRLF でないと行頭に戻らない）。
 	// defer は後入れ先出しなので、Restore より後に登録したこちらが先に走る。
 	write(render.Enter())
 	defer write(render.Leave())
 
-	// raw mode では Ctrl-C は SIGINT にならず 1 バイトとして届くので、それは
-	// Decoder が拾う。ここで待つのは、外から kill されたときのぶんである。
+	// raw mode ではキーからシグナルが起きなくなる（Ctrl-C は 1 バイトとして届くので
+	// Decoder が拾う）。ここで待つのは、外から kill されたときのぶんである。
 	// 拾わずに殺されると、やはり端末が戻らないまま残る。
+	//
+	// SIGKILL は捕まえられないので、それで殺された場合だけは端末が戻らない。
+	// SIGTSTP（一時停止）も扱っていない。止まっている間 raw mode のままになるが、
+	// 正しく直すには停止と再開の両方で端末を付け替える必要があり、M1 では見送る。
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGTERM, syscall.SIGHUP, os.Interrupt)
+	signal.Notify(signals, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, os.Interrupt)
 	defer signal.Stop(signals)
 
 	return play(signals)
@@ -78,7 +88,6 @@ func run() error {
 // play はゲームが終わるまで回り続ける。
 func play(signals <-chan os.Signal) error {
 	g := game.New(randomDraw())
-	write(render.Frame(g))
 
 	keys := readAll(os.Stdin)
 	var decoder input.Decoder
@@ -86,7 +95,14 @@ func play(signals <-chan os.Signal) error {
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 
+	// コアへ渡すのは「前に進めたときから実際に何秒経ったか」であって、刻みの設定値ではない。
+	// time.Ticker は受け取りが遅れると刻みを捨てるので、設定値を渡し続けると
+	// ゲームの中の時間が実時間より遅れていく。
+	last := time.Now()
+
 	for {
+		write(render.Frame(g))
+
 		// 「キーが押される」と「時間が経つ」は、どちらもいつ来るか分からない。
 		// select はその 2 つを 1 か所で待つための仕組みで、先に来たほうを処理する。
 		select {
@@ -104,11 +120,10 @@ func play(signals <-chan os.Signal) error {
 				g.Handle(action.Input)
 			}
 
-		case <-ticker.C:
-			g.Update(tickInterval)
+		case now := <-ticker.C:
+			g.Update(now.Sub(last))
+			last = now
 		}
-
-		write(render.Frame(g))
 	}
 }
 
@@ -117,6 +132,11 @@ func play(signals <-chan os.Signal) error {
 // 読み取りは何か届くまで戻ってこない。そのまま呼ぶと、キーが押されない限り
 // 時間を測れず、ミノが落ちなくなる。別の goroutine に切り離して、
 // 待つ場所を select ひとつに集めている。
+//
+// この goroutine は終わらせない。ゲームを抜けるとき、読み取りの途中で止まったまま
+// 残ることになるが、直後にプロセスごと終わるので回収の必要がない。**止めようとする方が
+// 危ない**——読み取りを中断する手立ては端末を閉じることで、それは端末を元に戻す前の
+// 状態を壊しかねない。
 func readAll(r io.Reader) <-chan []byte {
 	chunks := make(chan []byte)
 
@@ -144,8 +164,12 @@ func readAll(r io.Reader) <-chan []byte {
 
 // randomDraw は次のミノを一様な乱数で選ぶ（→ CONTEXT.md「抽選」）。
 //
-// 同じミノが何度も続いて理不尽になるのを直すのは M5（#6）の 7バッグで、
-// そのときに差し替わるのはこの関数だけである。コアには手が入らない。
+// 同じミノが何度も続いて理不尽になるのを直すのは M5（#6）の 7バッグ。
+// コアには手が入らず、差し替わるのは抽選の中身だけである。
+//
+// ただし M2 でブラウザ版の入口ができると、同じものがそちらにも要る。**7バッグを
+// 入れる時点で、抽選は両方の入口から使える場所へ移すことになる**（テストも要る）。
+// いまここに置いてあるのは、使う人がまだ 1 人しかいないからにすぎない。
 func randomDraw() func() game.MinoKind {
 	kinds := game.AllKinds()
 	return func() game.MinoKind {

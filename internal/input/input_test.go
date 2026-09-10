@@ -94,6 +94,47 @@ func TestUnknownEscapeSequenceIsSkipped(t *testing.T) {
 	assertActions(t, got, []Action{{Quit: true}})
 }
 
+// 端末が application cursor key mode に入っていると、矢印キーは ESC [ ではなく
+// ESC O で始まる。片方しか見ないと設定次第で矢印が全部効かなくなる。
+func TestArrowKeysInApplicationCursorMode(t *testing.T) {
+	tests := map[string]Action{
+		"\x1bOD": {Input: game.MoveLeft},
+		"\x1bOC": {Input: game.MoveRight},
+		"\x1bOB": {Input: game.SoftDrop},
+		"\x1bOA": {Input: game.RotateCW},
+	}
+
+	for bytes, want := range tests {
+		var d Decoder
+		assertActions(t, d.Decode([]byte(bytes)), []Action{want})
+	}
+}
+
+// 修飾キー付きの矢印は ESC [ 1 ; 5 D のように 3 バイトを超える。
+// 長さを決め打ちにすると余りが出て、その残骸が別のキーとして読まれる。
+func TestModifiedArrowIsConsumedWhole(t *testing.T) {
+	var d Decoder
+
+	// Ctrl+← のあとに q。q だけが読めること（残骸から幽霊の操作が湧かないこと）。
+	got := d.Decode([]byte("\x1b[1;5Dq"))
+
+	assertActions(t, got, []Action{{Quit: true}})
+}
+
+// 終わりの来ない並びを渡されても、持ち越しが際限なく膨らまないこと。
+func TestPendingIsBoundedForANeverEndingSequence(t *testing.T) {
+	var d Decoder
+
+	for i := 0; i < 100; i++ {
+		// 引数バイトばかりで終端バイトが来ない並び。
+		d.Decode([]byte("\x1b[123456789"))
+	}
+
+	if len(d.pending) > maxSequence {
+		t.Errorf("持ち越しが %d バイトまで膨らんだ（上限は %d）", len(d.pending), maxSequence)
+	}
+}
+
 // 持ち越しが無いのに内側の配列だけが育ち続けないこと。
 // 1 秒に何十回も呼ばれるので、ここが積み上がると遊んでいる間ずっと太り続ける。
 func TestPendingDoesNotGrowWhenEverythingIsConsumed(t *testing.T) {

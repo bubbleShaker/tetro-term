@@ -9,7 +9,12 @@ import "time"
 type Input uint8
 
 const (
-	MoveLeft Input = iota
+	// InputNone は「何もしない」。ゼロ値をここに割り当ててあるのは、Input を
+	// 入れ忘れた値がうっかり本物の操作として扱われないようにするためである。
+	// 先頭を移動や回転にしておくと、「操作ではない」つもりの値がそのまま
+	// 左移動として効いてしまう。
+	InputNone Input = iota
+	MoveLeft
 	MoveRight
 	SoftDrop
 	RotateCW

@@ -108,6 +108,19 @@ func TestSoftDropMovesOneStepAndResetsTheTimer(t *testing.T) {
 	}
 }
 
+// Input のゼロ値は何もしない。入れ忘れた値が左移動として効いてしまわないこと。
+func TestZeroInputDoesNothing(t *testing.T) {
+	g := New(fixedDraw(O))
+	before, _ := g.Active()
+
+	var unset Input
+	g.Handle(unset)
+
+	if after, _ := g.Active(); after != before {
+		t.Errorf("何も入っていない入力でミノが %+v から %+v へ動いた", before, after)
+	}
+}
+
 func TestRotationTurnsTheMino(t *testing.T) {
 	g := New(fixedDraw(T))
 
