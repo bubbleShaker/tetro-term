@@ -19,11 +19,19 @@ import (
 	"testing"
 )
 
-// rule は 1 つのパッケージが依存してよいものの全部。ここに無いものを import したら落ちる。
+// rule は 1 つのパッケージの依存に関する決まり。
+//
+// 内側の層には allowed（許可したものだけ）を使う。依存してよいものが数えられるほど
+// 少なく、増えること自体が設計の崩れだからである。
+//
+// 入口（cmd/）には forbidden（これだけは駄目）を使う。入口は端末やブラウザに触るのが
+// 仕事なので、標準ライブラリを使うたびに表を書き足させるのは邪魔にしかならない。
+// 守りたいのは 1 つだけ——**2 つの入口が互いの世界のものを持ち込まないこと**である。
 type rule struct {
-	dir     string
-	why     string
-	allowed []string
+	dir       string
+	why       string
+	allowed   []string
+	forbidden []string
 }
 
 var rules = []rule{
@@ -33,6 +41,15 @@ var rules = []rule{
 			"ここに syscall/js や golang.org/x/term や internal/render が現れたら、" +
 			"追加するのではなく設計を直す。time は型のためだけで、いま何時かは問い合わせない",
 		allowed: []string{"fmt", "time"},
+	},
+	{
+		dir: "../input",
+		why: "キーの読み替えは端末に固有ではない。xterm.js が本物の端末と同じバイト列を" +
+			"送ってくるので、M2 のブラウザ版はここをそのまま使い回す。" +
+			"golang.org/x/term のような端末専用のものが現れたら、その前提が壊れる",
+		allowed: []string{
+			"github.com/bubbleShaker/tetro-term/internal/game",
+		},
 	},
 	{
 		dir: "../render",
@@ -45,21 +62,44 @@ var rules = []rule{
 			"github.com/bubbleShaker/tetro-term/internal/game",
 		},
 	},
+	{
+		dir:       "../../cmd/tetro",
+		why:       "ターミナル版の入口。ブラウザのものを持ち込む先ではない",
+		forbidden: []string{"syscall/js"},
+	},
+	{
+		dir:       "../../cmd/tetro-wasm",
+		why:       "ブラウザ版の入口。端末専用のものを持ち込むと js/wasm でビルドできなくなる",
+		forbidden: []string{"golang.org/x/term", "os/signal"},
+	},
+}
+
+// violates は、その import が決まりを破っているかを返す。
+func (r rule) violates(path string) bool {
+	for _, banned := range r.forbidden {
+		if path == banned {
+			return true
+		}
+	}
+	if r.allowed == nil {
+		return false
+	}
+	for _, ok := range r.allowed {
+		if path == ok {
+			return false
+		}
+	}
+	return true
 }
 
 func TestPackagesOnlyDependOnWhatTheyAreAllowedTo(t *testing.T) {
 	for _, r := range rules {
 		t.Run(filepath.Base(r.dir), func(t *testing.T) {
-			allowed := map[string]bool{}
-			for _, path := range r.allowed {
-				allowed[path] = true
-			}
-
 			checked := 0
 			for _, name := range sourceFiles(t, r.dir) {
 				checked++
 				for _, path := range importsOf(t, filepath.Join(r.dir, name)) {
-					if !allowed[path] {
+					if r.violates(path) {
 						t.Errorf("%s が %q に依存している\n理由: %s", name, path, r.why)
 					}
 				}
