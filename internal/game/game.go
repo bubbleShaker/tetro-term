@@ -51,6 +51,10 @@ func (g *Game) Update(dt time.Duration) {
 	g.elapsed += dt
 	// dt が落下間隔を超えることもある（タブが背面にいた、描画が詰まった等）ので、
 	// 1 段ではなく溜まった分だけ落とす。
+	//
+	// 途中でロックが起きると spawn が落下タイマーを 0 に戻すため、余っていた時間は
+	// そこで捨てられ、このループも抜ける。新しく出てきたミノが、前のミノが溜めた時間の
+	// せいでいきなり数段落ちる、という事故を防ぐためにそうしている。
 	for g.elapsed >= FallInterval {
 		g.elapsed -= FallInterval
 		g.stepDown()
@@ -79,25 +83,37 @@ func (g *Game) Handle(in Input) {
 	}
 }
 
-// stepDown は 1 段落とす。落とせなければ、そこが接地である。
-// M1 では接地がそのままロックの瞬間になる（ロックディレイは #5）。
+// tryPlace は候補の位置へアクティブミノを移し、移せたかどうかを返す。
+//
+// 「いまの姿を複製し、動かし、そこに置けるか確かめ、置けるときだけ採用する」という手順は
+// 落下にも横移動にも回転にも共通なので、ここに 1 つだけ置く。**盤面に触れずに候補を作れる**
+// のは、アクティブミノが盤面の一部ではないから（→ CONTEXT.md「盤面」）である。
+func (g *Game) tryPlace(candidate ActiveMino) bool {
+	if g.board.collides(candidate) {
+		return false
+	}
+	g.active = candidate
+	return true
+}
+
+// stepDown は 1 段落とす。落とせなければ、そこでロックする。
+//
+// 「接地した瞬間」ではなく「接地したあと次に落とそうとした時」がロックの瞬間になる。
+// つまり着地から最大で落下間隔ぶんだけ猶予が生まれる。M1 はこれを是とする
+// （そのほうが遊びやすく、実装も素直なため）。#5 のロックディレイは、この偶然の猶予を
+// 「動かすたびに測り直す 0.5 秒」という意図のあるルールへ置き換える作業になる。
 func (g *Game) stepDown() {
 	moved := g.active
 	moved.Pos.Y++
-	if g.board.collides(moved) {
+	if !g.tryPlace(moved) {
 		g.lockAndSpawn()
-		return
 	}
-	g.active = moved
 }
 
 func (g *Game) shift(dx int) {
 	moved := g.active
 	moved.Pos.X += dx
-	if g.board.collides(moved) {
-		return
-	}
-	g.active = moved
+	g.tryPlace(moved)
 }
 
 // rotate は回転を試みる。
@@ -112,8 +128,7 @@ func (g *Game) rotate(to Rotation) {
 		candidate.Rot = to
 		candidate.Pos.X += offset.X
 		candidate.Pos.Y += offset.Y
-		if !g.board.collides(candidate) {
-			g.active = candidate
+		if g.tryPlace(candidate) {
 			return
 		}
 	}

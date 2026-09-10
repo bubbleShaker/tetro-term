@@ -84,7 +84,7 @@ func artRows(art string) []string {
 }
 
 func kindFromRune(r rune) (MinoKind, bool) {
-	for _, k := range Kinds {
+	for _, k := range AllKinds() {
 		if rune(k.String()[0]) == r {
 			return k, true
 		}

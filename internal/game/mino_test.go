@@ -6,7 +6,7 @@ import "testing"
 // 形そのものの正しさ（T が T の字に見えるか）は目で見るしかないが、
 // 「4 セルある」「箱からはみ出していない」「重複していない」は機械が確かめられる。
 func TestShapesAreWellFormed(t *testing.T) {
-	for _, kind := range Kinds {
+	for _, kind := range AllKinds() {
 		for rot := range shapes[kind] {
 			shape := shapes[kind][rot]
 			seen := map[Point]bool{}
@@ -32,6 +32,17 @@ func TestOMinoDoesNotMoveWhenRotated(t *testing.T) {
 		if shapes[O][rot] != base {
 			t.Errorf("O の %v が %v と違う形になっている: %+v", rot, Rot0, shapes[O][rot])
 		}
+	}
+}
+
+// 抽選（→ CONTEXT.md）の実装は母集団をここから受け取る。受け取った側が中身を
+// いじってもこちらの表が変わらないことを確かめる。
+func TestAllKindsCannotBeMutatedFromOutside(t *testing.T) {
+	got := AllKinds()
+	got[0] = L
+
+	if AllKinds()[0] != I {
+		t.Errorf("受け取った配列を書き換えたら元の表まで変わった: %v", AllKinds()[0])
 	}
 }
 

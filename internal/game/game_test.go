@@ -45,6 +45,27 @@ func TestLargeDeltaDropsEveryStepThatFits(t *testing.T) {
 	}
 }
 
+// 大きな dt の途中でロックが起きたら、余った時間はそこで捨てる。捨てないと、
+// 前のミノが溜めた時間のせいで新しいミノがいきなり数段落ちる。
+func TestLockDiscardsLeftoverFallTime(t *testing.T) {
+	g := New(fixedDraw(O, T))
+	// O を床に接した状態に置く。次に落とそうとした時点でロックされる。
+	g.active = ActiveMino{Kind: O, Rot: Rot0, Pos: Point{X: 3, Y: Height - 2}}
+
+	g.Update(3 * FallInterval)
+
+	next, ok := g.Active()
+	if !ok {
+		t.Fatal("ロック後に次のミノが出ていない")
+	}
+	if next.Kind != T {
+		t.Fatalf("次のミノが %v、期待は T", next.Kind)
+	}
+	if next.Pos.Y != spawnPos.Y {
+		t.Errorf("新しいミノが前のミノの余り時間で %d 段落ちている", next.Pos.Y-spawnPos.Y)
+	}
+}
+
 func TestMoveStopsAtTheWall(t *testing.T) {
 	g := New(fixedDraw(O))
 

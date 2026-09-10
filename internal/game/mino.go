@@ -26,8 +26,17 @@ const (
 	L
 )
 
-// Kinds は 7 種すべて。抽選（→ CONTEXT.md）の実装が母集団として使う。
-var Kinds = [7]MinoKind{I, O, T, S, Z, J, L}
+// kindCount はミノの種類の数。
+const kindCount = 7
+
+var allKinds = [kindCount]MinoKind{I, O, T, S, Z, J, L}
+
+// AllKinds は 7 種すべてを返す。抽選（→ CONTEXT.md）の実装が母集団として使う。
+//
+// 変数ではなく関数なのは、公開した変数は外から書き換えられるからである。
+// 配列を返しているので、受け取った側が中身をいじってもこちらの表には届かない
+// （スライスだと同じ配列を指してしまい、書き換えが筒抜けになる）。
+func AllKinds() [kindCount]MinoKind { return allKinds }
 
 func (k MinoKind) String() string {
 	// 添字は上の const の並びと対応している。
@@ -200,13 +209,20 @@ var shapeArt = map[MinoKind][4]string{
 }
 
 // shapes は shapeArt を座標に直したもの。当たり判定は絵ではなく座標で行う。
-var shapes = map[MinoKind][4]shape{}
+//
+// map ではなく配列なのは、知らない種類で引いたときに黙ってゼロ値を返させないため。
+// map だと 4 セルすべてが (0,0) に潰れた「形」が返り、当たり判定が静かに狂う。
+// 配列なら範囲外の添字で panic するので、間違いがその場で露見する。
+var shapes [kindCount][4]shape
 
 // init は起動時に絵を座標へ変換する。
 //
 // 絵が壊れていたら panic する。これは実行時の異常ではなく、上の表を書き間違えたという
 // プログラマの誤りであり、テストを 1 つでも動かせば必ず起動時に露見する。
 func init() {
+	if len(shapeArt) != kindCount {
+		panic(fmt.Sprintf("game: 形の絵が %d 種ぶんしかない（%d 種必要）", len(shapeArt), kindCount))
+	}
 	for kind, arts := range shapeArt {
 		var parsed [4]shape
 		for rot, art := range arts {

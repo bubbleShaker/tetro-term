@@ -40,6 +40,34 @@ func TestClearLinesLeavesIncompleteRowsAlone(t *testing.T) {
 	}
 }
 
+// At は表示する側が盤面を読むための唯一の入口になる（→ M1 の PR 2）。
+// 盤面の外を指されたときに落ちるのではなく空のセルを返すのは、
+// 枠の外まで一続きに描きたい呼び出し側が、境目を自分で気にせずに済むようにするため。
+func TestAtReadsCellsAndTreatsOutsideAsEmpty(t *testing.T) {
+	b := parseBoard(t, `
+		....T.....
+	`)
+
+	if got := b.At(Point{X: 4, Y: Height - 1}); !got.Filled || got.Kind != T {
+		t.Errorf("埋まっているセルが %+v として読めた", got)
+	}
+	if got := b.At(Point{X: 3, Y: Height - 1}); got.Filled {
+		t.Errorf("空のセルが %+v として読めた", got)
+	}
+
+	outside := []Point{
+		{X: -1, Y: 0},
+		{X: Width, Y: 0},
+		{X: 0, Y: -1},
+		{X: 0, Y: Height},
+	}
+	for _, p := range outside {
+		if got := b.At(p); got.Filled {
+			t.Errorf("盤面の外 %+v が %+v として読めた", p, got)
+		}
+	}
+}
+
 func TestCollidesAtWallsAndFloor(t *testing.T) {
 	var b Board
 
