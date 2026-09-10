@@ -35,6 +35,15 @@ var rules = []rule{
 		allowed: []string{"fmt", "time"},
 	},
 	{
+		dir: "../input",
+		why: "キーの読み替えは端末に固有ではない。xterm.js が本物の端末と同じバイト列を" +
+			"送ってくるので、M2 のブラウザ版はここをそのまま使い回す。" +
+			"golang.org/x/term のような端末専用のものが現れたら、その前提が壊れる",
+		allowed: []string{
+			"github.com/bubbleShaker/tetro-term/internal/game",
+		},
+	},
+	{
 		dir: "../render",
 		why: "レンダラは盤面を文字列に直すだけで、その文字列をどこへ流すかは知らない。" +
 			"端末やブラウザに触るものが現れたら、CLI 版とブラウザ版で同じ画が出る保証が崩れる。" +
