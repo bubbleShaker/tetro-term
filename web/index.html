@@ -40,6 +40,11 @@
         padding: max(0.75rem, env(safe-area-inset-top)) 0.75rem
           max(0.75rem, env(safe-area-inset-bottom));
         overflow: hidden;
+        /* ダブルタップによる拡大を止める。viewport の user-scalable=no は
+           iOS Safari が無視するので、こちらが本命の防ぎ手になる。
+           none ではなく manipulation にしてあるのは、二本指の拡大まで殺すと
+           見えづらいときの逃げ道が無くなるためである。 */
+        touch-action: manipulation;
       }
 
       /* #stage は「端末を置ける広さ」を表すだけの入れ物。
@@ -83,11 +88,59 @@
       #status.error {
         color: #e05252;
       }
+
+      /* タッチ操作のボタン列。中身は web/main.js が Go から受け取って作る。
+         ここが空なのは、ボタンが何個あってどちらの親指に置かれるかを
+         知っているのが Go の internal/input だけだからである。
+
+         position: fixed ではなく body の縦フローに置いてある。出た分だけ
+         #stage が縮み、#stage を見ている ResizeObserver が端末の倍率を
+         測り直す——重なりを避ける計算をこちらで持つ必要がない。 */
+      #pad {
+        display: none;
+        width: 100%;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+      body.touch #pad {
+        display: flex;
+      }
+      .pad-side {
+        display: flex;
+        gap: 0.5rem;
+      }
+      .pad-button {
+        /* 指で狙える大きさを最優先する（44px を下回らない）。
+           画面が狭ければ縮むが、縮みすぎない。 */
+        width: clamp(2.75rem, 17vw, 4rem);
+        aspect-ratio: 1;
+        font-size: clamp(1.1rem, 6vw, 1.6rem);
+        line-height: 1;
+        color: var(--fg);
+        background: #151a24;
+        border: 1px solid #2a3446;
+        border-radius: 12px;
+        /* 押した場所と操作を 1 対 1 にする。none がスクロールと拡大を止め、
+           残り 3 つが長押しの選択・メニュー・タップ時の灰色の被せを止める。
+           これが無いと、素早く連打したときに操作ではなく文字選択が始まる。 */
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      /* :active ではなく自前のクラスで光らせる。pointerdown を preventDefault
+         しているので、:active が付くかはブラウザ任せになってしまう。 */
+      .pad-button.pressed {
+        background: #26314a;
+        border-color: #3d4d6b;
+      }
     </style>
   </head>
   <body>
     <div id="stage"><div id="terminal"></div></div>
     <p id="status">Go の WebAssembly を読み込んでいます…</p>
+    <div id="pad"></div>
 
     <!-- wasm_exec.js は Go の GOROOT からビルド時にコピーされる（scripts/build-wasm.sh） -->
     <script src="./wasm_exec.js"></script>
