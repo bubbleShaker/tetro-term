@@ -55,7 +55,29 @@ func (t terminal) write(s string) {
 type setup struct {
 	cols, rows int
 	help       string
-	tick, data js.Func
+	// buttons はタッチ操作のボタン列（→ internal/input の touch.go）。
+	// 寸法や操作説明と同じく、**JS 側が持つべきでない知識**なので Go から配る。
+	buttons          []input.Button
+	tick, data, press js.Func
+}
+
+// jsButtons はボタンの一覧を JS が読める形に直す。
+//
+// 意味（どの入力になるか）は渡さない。JS が受け取るのは「何と書いてあるか」と
+// 「押されたときに何と言って返すか」だけで、id を入力に読み替えるのは
+// 押されたあとの input.Press である。
+func jsButtons(bs []input.Button) []any {
+	out := make([]any, 0, len(bs))
+	for _, b := range bs {
+		out = append(out, map[string]any{
+			"id":     b.ID,
+			"label":  b.Label,
+			"what":   b.What,
+			"side":   string(b.Side),
+			"repeat": b.Repeat,
+		})
+	}
+	return out
 }
 
 // ready は「Go の起動が終わった」ことを伝え、**同時に JS から Go を呼ぶ窓口を渡す**。
@@ -70,11 +92,13 @@ type setup struct {
 // 書けば割り当てを変えたときに説明だけ古くなる。どちらも動き続けるので誰も気づかない。
 func (t terminal) ready(s setup) {
 	t.obj.Call("ready", map[string]any{
-		"cols": s.cols,
-		"rows": s.rows,
-		"help": s.help,
-		"tick": s.tick,
-		"data": s.data,
+		"cols":    s.cols,
+		"rows":    s.rows,
+		"help":    s.help,
+		"buttons": jsButtons(s.buttons),
+		"tick":    s.tick,
+		"data":    s.data,
+		"press":   s.press,
 	})
 }
 
@@ -87,7 +111,7 @@ func (t terminal) gameOver() {
 	t.obj.Call("gameOver")
 }
 
-// driver は 1 ゲーム分の進行を持つ。JS から呼ばれるのは tick と data の 2 つだけ。
+// driver は 1 ゲーム分の進行を持つ。JS から呼ばれるのは tick・data・press の 3 つだけ。
 type driver struct {
 	term     terminal
 	game     *game.Game
@@ -123,6 +147,24 @@ func (d *driver) data(bytes string) {
 		}
 		d.game.Handle(action.Input)
 	}
+}
+
+// press はタッチボタンが押されたことを受け取る。
+//
+// data と入口が分かれているのは、ボタンにはバイト列という形が無いからである。
+// 矢印キーが ESC [ D として届くのは端末の都合であって、それをボタンのために
+// JS 側で組み立て直せば、キーの綴りが Go の外へ漏れる。入口は 2 つになるが、
+// **どちらも game.Handle ひとつに合流する**ので操作の解釈は二重にならない。
+//
+// data と同じく、ここでも画面は描かない。描くのは次の tick である。
+func (d *driver) press(id string) {
+	in, ok := input.Press(id)
+	if !ok {
+		// 知らない id。自分たちの JS しか呼ばないので普段は起きないが、
+		// 黙って別の操作になるより何も起きないほうが気づける。
+		return
+	}
+	d.game.Handle(in)
 }
 
 // render は絵が変わっていれば端末へ送り、ゲームが終わっていれば一度だけ知らせる。
@@ -162,15 +204,17 @@ func main() {
 	// 要らない。Go のインスタンスが JS へ制御を返すのは全ゴルーチンが止まったときだけで、
 	// ここは何にも待たずに走り切る。
 	//
-	// js.FuncOf で作った関数は本来 Release が要るが、この 2 つはタブが閉じるまで
+	// js.FuncOf で作った関数は本来 Release が要るが、この 3 つはタブが閉じるまで
 	// 呼ばれ続ける。解放するのは「もう呼ばれない」と決まったときで、その瞬間は来ない。
 	cols, rows := render.Size()
 	d.term.ready(setup{
-		cols: cols,
-		rows: rows,
-		help: input.KeyHelp(),
-		tick: callback(func(v js.Value) { d.tick(v.Float()) }),
-		data: callback(func(v js.Value) { d.data(v.String()) }),
+		cols:    cols,
+		rows:    rows,
+		help:    input.KeyHelp(),
+		buttons: input.Buttons(),
+		tick:    callback(func(v js.Value) { d.tick(v.Float()) }),
+		data:    callback(func(v js.Value) { d.data(v.String()) }),
+		press:   callback(func(v js.Value) { d.press(v.String()) }),
 	})
 
 	// 画面へ入る。CLI 版と違い、対になる render.Leave() は呼ばない——
