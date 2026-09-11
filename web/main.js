@@ -113,8 +113,16 @@ function enableTouchMode() {
   // inputmode="none" は「文字入力の口ではあるが画面キーボードは要らない」という
   // 指定で、外付けキーボードからの入力は通る——タッチ対応 PC でキーが死なない
   // のはこのためである。
+  //
+  // **付けるだけでは足りない**。粗いポインタとして検出されなかった端末では、
+  // ここへ来るまでに start() が既にフォーカスを載せている。inputmode は
+  // 「次にフォーカスされたとき」の話なので、もう出ているキーボードは引っ込まない。
+  // 一度外して、載せ直させない。
   const textarea = terminalEl.querySelector("textarea");
-  if (textarea) textarea.inputMode = "none";
+  if (textarea) {
+    textarea.inputMode = "none";
+    textarea.blur();
+  }
 
   if (statusShowsHelp) showKeyHelp();
 
@@ -202,14 +210,8 @@ function padButton(button, press) {
     el.addEventListener(type, stop);
   }
 
-  // 押したままタブを離れる・着信で画面が変わると、pointerup が来ないことがある。
-  // 止め忘れると、戻ってきた瞬間にミノが端まで走る。
-  window.addEventListener("blur", stop);
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) stop();
-  });
-
-  return el;
+  // 止め方はボタン 1 つの都合ではないので（→ buildPad）、外へ渡す。
+  return { el, stop };
 }
 
 // buildPad は Go から来たボタン列を、左右の親指ごとにまとめて並べる。
@@ -218,6 +220,7 @@ function padButton(button, press) {
 // 「left が画面の左」以上のことは決めていない。並ぶ順は Go が返した順である。
 function buildPad(buttons, press) {
   const sides = new Map();
+  const stops = [];
 
   for (const button of buttons) {
     let side = sides.get(button.side);
@@ -227,8 +230,22 @@ function buildPad(buttons, press) {
       sides.set(button.side, side);
       padEl.append(side);
     }
-    side.append(padButton(button, press));
+    const { el, stop } = padButton(button, press);
+    stops.push(stop);
+    side.append(el);
   }
+
+  // 押したままタブを離れる・着信で画面が変わると、pointerup が来ないことがある。
+  // 止め忘れると、戻ってきた瞬間にミノが端まで走る。
+  //
+  // **ボタンごとではなく、ここで一度だけ引っ掛ける**。「全部止める」は個々の
+  // ボタンの都合ではなく列全体の話であり、ボタンごとに登録すると同じ大域リスナが
+  // ボタンの数だけ増える（増えた分は誰も外さない）。
+  const stopAll = () => stops.forEach((stop) => stop());
+  window.addEventListener("blur", stopAll);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopAll();
+  });
 }
 
 // start は Go の準備が終わったときに呼ばれる。tick・data・press はどれも Go の関数。

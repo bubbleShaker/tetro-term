@@ -44,9 +44,10 @@ var rules = []rule{
 	},
 	{
 		dir: "../input",
-		why: "キーの読み替えは端末に固有ではない。xterm.js が本物の端末と同じバイト列を" +
-			"送ってくるので、M2 のブラウザ版はここをそのまま使い回す。" +
-			"golang.org/x/term のような端末専用のものが現れたら、その前提が壊れる",
+		why: "押されたものの読み替えは、それを押した装置に固有ではない。キーは" +
+			"xterm.js が本物の端末と同じバイト列を送ってくるのでブラウザ版でもそのまま通り、" +
+			"タッチボタンは装置の都合を持たない id で届く。golang.org/x/term のような" +
+			"端末専用のものや syscall/js のようなブラウザ専用のものが現れたら、その前提が壊れる",
 		allowed: []string{
 			"strings",
 			"github.com/bubbleShaker/tetro-term/internal/game",

@@ -57,7 +57,9 @@ const types = {
 const server = createServer(async (req, res) => {
   const rel = decodeURIComponent(new URL(req.url, "http://x").pathname);
   const file = path.join(webDir, rel === "/" ? "index.html" : rel);
-  if (!file.startsWith(webDir)) {
+  // path.sep まで含めて確かめる。前置きだけを見ると web の隣にある web-old が
+  // 通ってしまう。手元専用のサーバーとはいえ、正しいほうを書く。
+  if (file !== webDir && !file.startsWith(webDir + path.sep)) {
     res.writeHead(403).end();
     return;
   }
@@ -261,6 +263,96 @@ check(
   Number.isFinite(atLeft) && Number.isFinite(atRight) && atLeft < atRight,
   `左寄せ ${atLeft} 桁目 / 右寄せ ${atRight} 桁目`,
 );
+
+// --- 粗いポインタとして検出されない端末 -----------------------------------
+//
+// タッチ対応のノート PC のように (pointer: coarse) に当たらない端末では、
+// ボタンが出るのは**最初に指で触られたとき**になる。ここまでに start() が
+// 端末へフォーカスを載せているので、その時点で inputmode が付いていないと、
+// 最初の一触りがそのままソフトキーボードの呼び出しになる。
+//
+// Playwright は hasTouch を立てるだけで (pointer: coarse) にしてしまい、
+// CDP の Emulation でも動かせなかったので、matchMedia を横取りして
+// 「判定が外れた端末」を作る。
+{
+  const hybrid = await browser.newContext({
+    hasTouch: true,
+    isMobile: false, // 指もあるがマウスもある、という端末
+    viewport: { width: 1024, height: 768 },
+  });
+  await hybrid.addInitScript(() => {
+    const orig = window.matchMedia.bind(window);
+    window.matchMedia = (q) =>
+      q.includes("coarse") ? { matches: false, media: q, addEventListener() {} } : orig(q);
+
+    // フォーカスが載った**その瞬間**に inputmode が何だったかを控える。
+    // あとから見て "none" になっていても、載った時点で付いていなければ
+    // ソフトキーボードはもう出ている。順序こそが守りたいものである。
+    window.__inputModeAtFocus = [];
+    const origFocus = HTMLTextAreaElement.prototype.focus;
+    HTMLTextAreaElement.prototype.focus = function (...args) {
+      window.__inputModeAtFocus.push(this.inputMode);
+      return origFocus.apply(this, args);
+    };
+  });
+
+  const p = await hybrid.newPage();
+  await p.goto(origin, { waitUntil: "load" });
+  await p.waitForSelector("body.ready", { timeout: 30000 });
+
+  // 前提が崩れていたら（＝最初から出ていたら）この検証は意味を成さない。
+  check(
+    "前提: 判定では出ず、先に端末へフォーカスが載っている",
+    await p.evaluate(
+      () =>
+        !document.body.classList.contains("touch") &&
+        document.activeElement === document.querySelector("#terminal textarea"),
+    ),
+  );
+
+  const focusesBeforeTouch = await p.evaluate(() => window.__inputModeAtFocus.length);
+
+  const cdp2 = await hybrid.newCDPSession(p);
+  await cdp2.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: 512, y: 300 }], // 端末の上を直に触る
+  });
+  await cdp2.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await p.waitForTimeout(200);
+
+  // 触られた時点でボタンが出て、テキストエリアが画面キーボードを呼ばなくなること。
+  //
+  // フォーカスが外れたままであることは**求めない**。xterm.js 自身が端末を
+  // 触られたらテキストエリアへフォーカスを戻すので、そこを奪い合っても勝てない。
+  // 守りたいのは「フォーカスが載るより前に inputmode が付いていること」——
+  // 順序のほうである。次のチェックがそれを見る。
+  const state = await p.evaluate(() => {
+    const ta = document.querySelector("#terminal textarea");
+    return {
+      touch: document.body.classList.contains("touch"),
+      buttons: document.querySelectorAll(".pad-button").length,
+      inputMode: ta?.inputMode,
+    };
+  });
+  check(
+    "後から指で触られてもボタンが出て、画面キーボードは呼ばれない",
+    state.touch && state.buttons === 5 && state.inputMode === "none",
+    JSON.stringify(state),
+  );
+
+  // 指を下ろしてから載ったフォーカスは、すべて inputmode が付いた後であること。
+  // 1 つでも付く前に載っていたら、そこでキーボードが出ている。
+  const duringTouch = await p.evaluate(
+    (n) => window.__inputModeAtFocus.slice(n),
+    focusesBeforeTouch,
+  );
+  check(
+    "フォーカスが載る前に画面キーボードを断れている",
+    duringTouch.every((mode) => mode === "none"),
+    `指を下ろしてからのフォーカス: ${JSON.stringify(duringTouch)}`,
+  );
+  await hybrid.close();
+}
 
 await browser.close();
 server.close();
